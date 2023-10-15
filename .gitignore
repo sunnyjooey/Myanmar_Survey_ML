@@ -1,0 +1,4 @@
+data/
+attic/
+**/.ipynb_checkpoints
+**/__pycache__
