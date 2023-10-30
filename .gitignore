@@ -2,3 +2,4 @@ data/
 attic/
 **/.ipynb_checkpoints
 **/__pycache__
+.dodsrc
