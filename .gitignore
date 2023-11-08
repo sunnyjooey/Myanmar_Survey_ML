@@ -3,3 +3,4 @@ attic/
 **/.ipynb_checkpoints
 **/__pycache__
 .dodsrc
+.DS_Store
