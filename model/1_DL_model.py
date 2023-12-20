@@ -1,8 +1,8 @@
 # Databricks notebook source
 ### CHANGE ME ###
-EXP_ID = "1229290435846837" 
-database_name = "myanmar"
-data_table = "lcvr_ref_model_2017"
+EXP_ID = "389746355820892" 
+database_name = "myanmar_ml"
+data_table = "lcvr_ref_model_2017_fixed"
 target_col = "y0_bin"
 
 # COMMAND ----------
