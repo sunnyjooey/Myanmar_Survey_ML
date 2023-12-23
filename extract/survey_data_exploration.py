@@ -41,12 +41,6 @@ numAdmin3Units=len(admin3DF.index)
 
 # COMMAND ----------
 
-
-
-
-
-# COMMAND ----------
-
 # explore spatial distribution of surveys
 import matplotlib.pyplot as plt
 
@@ -67,9 +61,14 @@ surveyLocations = np.array([[surveyDF.loc[i,'s0q22'], surveyDF.loc[i,'s0q23']] f
 # plot directional distribution of lat-lon
 latsSurveys=surveyLocations[:,0]
 fig=plt.hist(latsSurveys)
+plt.xlabel('latitude')
+plt.ylabel('number of surveys')
 plt.show()
+
 lonsSurveys=surveyLocations[:,1]
 plt.hist(lonsSurveys)
+plt.xlabel('longitude')
+plt.ylabel('number of surveys')
 plt.show()
 # note: the surveys are not equally distributed along lats and lons but centered around the central lat and lon; 
 
@@ -129,6 +128,7 @@ for iA in range(0,len(allAdmin3)):
         iPropPoor=iNumPoor/iNumSurv
     else:
         iAdmin3Name=''
+        iNumSurv=np.nan
         iNumPoor=np.nan
         iPropPoor=np.nan  
     #display(iAdmin3Name)
@@ -143,22 +143,42 @@ for iA in range(0,len(allAdmin3)):
 # get number of admin3 without surveys
 allAdmin3WithoutSurveys=surveysPerAdmin3DF[surveysPerAdmin3DF['NumSurveys_PerAdmin3']==0]
 numAdmin3WithoutSurveys=len(allAdmin3WithoutSurveys)
-display(numAdmin3WithoutSurveys)
+display('Number of admin3 without surveys: '+str(numAdmin3WithoutSurveys))
 
-# plot distribution of surveys per admin3
-plt.hist(surveysPerAdmin3DF['NumSurveys_PerAdmin3'],25)
+# check distribution of surveys per admin3
+plt.bar(range(0,numAdmin3Units),surveysPerAdmin3DF['NumSurveys_PerAdmin3'])
 plt.title('Number of surveys per admin3')
+plt.xlabel('admin3')
+plt.xlabel('number of surveys per admin3')
 plt.show()
 
-plt.hist(surveysPerAdmin3DF['NumPoor_PerAdmin3'],25)
+meanNumSurveysPerAdmin3=np.mean(surveysPerAdmin3DF['NumSurveys_PerAdmin3'])
+maxNumSurveysPerAdmin3=np.max(surveysPerAdmin3DF['NumSurveys_PerAdmin3'])
+display('mean and max number surveys per admin3: '+str(meanNumSurveysPerAdmin3)+' '+str(maxNumSurveysPerAdmin3))
+
+plt.hist(surveysPerAdmin3DF['NumSurveys_PerAdmin3'],50)
+plt.title('Distribution of survey numbers per admin3')
+plt.xlabel('number of surveys per admin3')
+plt.ylabel('frequency of number of surveys')
+plt.show()
+
+plt.hist(surveysPerAdmin3DF['NumPoor_PerAdmin3'],50)
 plt.title('Number of poor household per admin3')
+plt.xlabel('number of poor households per admin3')
+plt.ylabel('frequency of number of poor households')
 plt.show()
 
-plt.hist(surveysPerAdmin3DF['PropPoor_PerAdmin3'],25)
+plt.hist(surveysPerAdmin3DF['PropPoor_PerAdmin3'],50)
 plt.title('Proportion of poor per admin3')
+plt.xlabel('proportion of poor households per admin3')
+plt.ylabel('frequency of proportion of poor households')
 plt.show()
 
 
+
+# COMMAND ----------
+
+display(surveysPerAdmin3DF)
 
 # COMMAND ----------
 
