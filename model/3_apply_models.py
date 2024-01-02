@@ -1,26 +1,11 @@
 # Databricks notebook source
 import pandas as pd
+import re
 import mlflow
-import pyspark.sql.functions as F
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### Check survey response
-
-# COMMAND ----------
-
-poverty_line = 1302.951
-weight = 'hhweight'
-expenditure = 'r_totex_pad_v3'
-
-# COMMAND ----------
-
-# read in survey
-surv = pd.read_stata('/dbfs/FileStore/Myanmar_Survey_ML/data/survey/Assets_household_level.dta')
-# create poverty y and y-binary
-surv = pd.concat([surv, pd.Series((poverty_line - surv[expenditure]).clip(0) / poverty_line, name='y')], axis=1)
-surv['ybin'] = surv['y'].apply(lambda x: 1 if x > 0 else 0)
+df = spark.sql('SELECT * FROM myanmar_ml.lcvr_ref_model_2017_fixed')
 
 # COMMAND ----------
 
@@ -49,104 +34,162 @@ app_df = app_df.drop(['time', 'lat', 'lon'], axis=1)
 
 # COMMAND ----------
 
-# fitting the model super manually - refitting on entire data, then applying
-# application of the model directly led to 99% coordinates poor!
-
 target_col = "y0_bin"
 
-from databricks.automl_runtime.sklearn.column_selector import ColumnSelector
+# COMMAND ----------
 
-supported_cols = ["190", "viirs", "110", "120", "30", "201", "50", "150", "151", "153", "40", "200", "72", "Qh_tavg", "160", "130", "152", "180", "70", "71", "fatal_count", "SoilMoi100_200cm_tavg", "landscan", "170", "10", "62", "event_count", "Qair_f_tavg", "SoilMoi10_40cm_tavg", "82", "SoilMoi40_100cm_tavg", "121", "Qs_tavg", "11", "Evap_tavg", "60", "Tair_f_tavg", "61", "Qg_tavg", "90", "12", "SoilMoi00_10cm_tavg", "20", "81", "100", "Rainf_f_tavg"]
-col_selector = ColumnSelector(supported_cols)
-
-
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer
-from sklearn.preprocessing import OneHotEncoder as SklearnOneHotEncoder
-
-bool_imputers = []
-bool_pipeline = Pipeline(steps=[
-    ("cast_type", FunctionTransformer(lambda df: df.astype(object))),
-    ("imputers", ColumnTransformer(bool_imputers, remainder="passthrough")),
-    ("onehot", SklearnOneHotEncoder(handle_unknown="ignore", drop="first")),
-])
-bool_transformers = [("boolean", bool_pipeline, ["190", "110", "120", "30", "201", "50", "151", "153", "40", "200", "72", "160", "20", "130", "152", "180", "70", "71", "170", "10", "62", "82", "121", "11", "60", "61", "90", "12", "150", "81", "100"])]
+# fitting the model super manually - refitting on entire data, then applying
+def run_apply_model(runs, run_name, df, app_df):
+    # cols to drop
+    drop = ['time', 'lat', 'lon', 'y0', 'y0_nw', 'ya_25', 'ya_50', 'ya_75', 'ya_50_nw', 'y0_bin', 'ya_25_bin', 'ya_50_bin', 'ya_75_bin', '202', '80', '140', '122', '220']
+    
+    # select supported columns - all columns
+    from databricks.automl_runtime.sklearn.column_selector import ColumnSelector
+    supported_cols = [col for col in df.columns if col not in drop]
+    col_selector = ColumnSelector(supported_cols)
 
 
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer, StandardScaler
+    # boolean columns
+    from sklearn.compose import ColumnTransformer
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import FunctionTransformer
+    from sklearn.preprocessing import OneHotEncoder as SklearnOneHotEncoder
 
-num_imputers = []
-num_imputers.append(("impute_mean", SimpleImputer(), ["10", "100", "11", "110", "12", "120", "121", "130", "150", "151", "152", "153", "160", "170", "180", "190", "20", "200", "201", "30", "40", "50", "60", "61", "62", "70", "71", "72", "81", "82", "90", "Evap_tavg", "Qair_f_tavg", "Qg_tavg", "Qh_tavg", "Qs_tavg", "Rainf_f_tavg", "SoilMoi00_10cm_tavg", "SoilMoi100_200cm_tavg", "SoilMoi10_40cm_tavg", "SoilMoi40_100cm_tavg", "Tair_f_tavg", "event_count", "fatal_count", "landscan", "viirs"]))
-
-numerical_pipeline = Pipeline(steps=[
-    ("converter", FunctionTransformer(lambda df: df.apply(pd.to_numeric, errors='coerce'))),
-    ("imputers", ColumnTransformer(num_imputers)),
-    ("standardizer", StandardScaler()),
-])
-
-numerical_transformers = [("numerical", numerical_pipeline, ["190", "viirs", "110", "120", "30", "201", "50", "151", "153", "40", "200", "72", "Qh_tavg", "160", "130", "20", "152", "180", "70", "71", "fatal_count", "SoilMoi100_200cm_tavg", "landscan", "170", "event_count", "10", "62", "Qair_f_tavg", "SoilMoi10_40cm_tavg", "82", "SoilMoi40_100cm_tavg", "121", "Qs_tavg", "11", "Evap_tavg", "60", "Tair_f_tavg", "Qg_tavg", "61", "90", "12", "SoilMoi00_10cm_tavg", "150", "81", "100", "Rainf_f_tavg"])]
-
-
-from sklearn.compose import ColumnTransformer
-
-transformers = bool_transformers + numerical_transformers
-preprocessor = ColumnTransformer(transformers, remainder="passthrough", sparse_threshold=0)
+    bool_imputers = []
+    bool_pipeline = Pipeline(steps=[
+        ("cast_type", FunctionTransformer(lambda df: df.astype(object))),
+        ("imputers", ColumnTransformer(bool_imputers, remainder="passthrough")),
+        ("onehot", SklearnOneHotEncoder(handle_unknown="ignore", drop="first")),
+    ])
+    bool_cols = [col for col in supported_cols if col.isdigit()]
+    bool_transformers = [("boolean", bool_pipeline, bool_cols)]
 
 
-import lightgbm
-from lightgbm import LGBMClassifier
+    # numerical columns
+    from sklearn.compose import ColumnTransformer
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
-space = {
-  "colsample_bytree": 0.42792779427916483,
-  "lambda_l1": 135.74281049758403,
-  "lambda_l2": 11.394551336323014,
-  "learning_rate": 2.930187734854735,
-  "max_bin": 475,
-  "max_depth": 8,
-  "min_child_samples": 244,
-  "n_estimators": 211,
-  "num_leaves": 32,
-  "path_smooth": 26.75429763700822,
-  "subsample": 0.6717962717560846,
-  "random_state": 824288948,
-}
+    num_imputers = []
+    num_imputers.append(("impute_mean", SimpleImputer(), supported_cols))
 
+    numerical_pipeline = Pipeline(steps=[
+        ("converter", FunctionTransformer(lambda df: df.apply(pd.to_numeric, errors='coerce'))),
+        ("imputers", ColumnTransformer(num_imputers)),
+        ("standardizer", StandardScaler()),
+    ])
+    numerical_transformers = [("numerical", numerical_pipeline, supported_cols)]
 
-df = df.toPandas()
-y_train = df[target_col]
-drop = ['time', 'lat', 'lon', 'y0', 'y0_nw', 'ya_25', 'ya_50', 'ya_75', 'ya_50_nw', 'y0_bin', 'ya_25_bin', 'ya_50_bin', 'ya_75_bin']
-X_train = df.drop(drop, axis=1)
+    from sklearn.compose import ColumnTransformer
+    transformers = bool_transformers + numerical_transformers
+    preprocessor = ColumnTransformer(transformers, remainder="passthrough", sparse_threshold=0)
 
 
-pipeline_val = Pipeline([
-    ("column_selector", col_selector),
-    ("preprocessor", preprocessor),
-])
-pipeline_val.fit(X_train, y_train)
-lgbmc_classifier = LGBMClassifier(**space)
-model = Pipeline([
-    ("column_selector", col_selector),
-    ("preprocessor", preprocessor),
-    ("classifier", lgbmc_classifier),
-])
-model.fit(X_train, y_train)
+    # get parameter space from the model runs
+    param = runs.loc[runs['tags.mlflow.runName']==run_name, 'params.classifier'].iloc[0]
+    if not bool(re.match('TransformedTargetClassifier', param)):
+        if bool(re.match('LGBMClassifier', param)):
+            import lightgbm
+            from lightgbm import LGBMClassifier
+            param = param.strip(')').strip('LGBMClassifier(')
+            param_str_lst = [elem.strip('\n').strip() for elem in param.split(',')]
+            param_lst_lst = [elem.split('=') for elem in param_str_lst]
+            space = {lst[0]:lst[1] for lst in param_lst_lst}
+            space = {key: (float(val) if bool(re.search('\.', val)) else int(val)) for key,val in space.items()}
+            lgbmc_classifier = LGBMClassifier(**space)
+            
+        elif bool(re.match('DecisionTreeClassifier', param)):
+            from sklearn.tree import DecisionTreeClassifier
+            param = param.strip(')').strip('DecisionTreeClassifier(')
+            param_str_lst = [elem.strip('\n').strip() for elem in param.split(',')]
+            param_lst_lst = [elem.split('=') for elem in param_str_lst]
+            space = {lst[0]:lst[1] for lst in param_lst_lst}
+            space = {key: (float(val) if bool(re.search('\.', val)) else int(val)) for key,val in space.items()}
+            lgbmc_classifier = DecisionTreeClassifier(**space)
 
-run_name = 'calm-sponge-868'
-model_name = f'{run_name}-manual'
-# predict
-pred = model.predict(app_df)
-app_df[model_name] = pred
+        elif bool(re.match('LogisticRegression', param)):
+            from sklearn.linear_model import LogisticRegression
+            param = param.strip(')').strip('LogisticRegression(')
+            param_str_lst = [elem.strip('\n').strip() for elem in param.split(',')]
+            param_lst_lst = [elem.split('=') for elem in param_str_lst]
+            space = {lst[0]:lst[1] for lst in param_lst_lst}
+            space = {key: (float(val) if bool(re.search('\.', val)) else int(val)) for key,val in space.items()}
+            lgbmc_classifier = LogisticRegression(**space)
 
-# proportion poor
-one_run = runs.loc[runs['tags.mlflow.runName']==run_name, ['run_id', 'tags.mlflow.runName', 'metrics.test_f1_score', 'metrics.test_precision_score', 'metrics.test_recall_score', 'metrics.test_roc_auc']]
-one_run.loc[one_run['tags.mlflow.runName']==run_name, 'tags.mlflow.runName'] = model_name
-proportions = app_df.groupby(model_name).size() / app_df.groupby(model_name).size().sum()
-one_run['prop_poor'] = [proportions[1]]
+        elif bool(re.match('RandomForestClassifier', param)):
+            from sklearn.ensemble import RandomForestClassifier
+            param = param.strip(')').strip('RandomForestClassifier(')   
+            param_str_lst = [elem.strip('\n').strip() for elem in param.split(',')]
+            param_lst_lst = [elem.split('=') for elem in param_str_lst]
+            space = {lst[0]:lst[1] for lst in param_lst_lst}
+            space = {key: (float(val) if bool(re.search('\.', val)) else int(val)) for key,val in space.items()}
+            lgbmc_classifier = RandomForestClassifier(**space)
+
+        # data
+        df = df.toPandas()
+
+        # to get evaluation metrics
+        print('Train - val - test model')
+        from sklearn.model_selection import train_test_split
+        
+        split_train_df, split_test_df = train_test_split(df, test_size=0.4)
+        split_test_df, split_val_df = train_test_split(split_test_df, test_size=0.5)
+        
+        # Separate target column from features and drop _automl_split_col_0000
+        X_train = split_train_df.drop(target_col, axis=1)
+        y_train = split_train_df[target_col]
+
+        X_val = split_val_df.drop(target_col, axis=1)
+        y_val = split_val_df[target_col]
+
+        X_test = split_test_df.drop(target_col, axis=1)
+        y_test = split_test_df[target_col]
+
+        pipeline_val = Pipeline([
+            ("column_selector", col_selector),
+            ("preprocessor", preprocessor),
+        ])
+        pipeline_val.fit(X_train, y_train)
+        X_val_processed = pipeline_val.transform(X_val)
+
+        model = Pipeline([
+        ("column_selector", col_selector),
+        ("preprocessor", preprocessor),
+        ("classifier", lgbmc_classifier),
+        ])
+
+        model.fit(X_train, y_train, classifier__callbacks=[lightgbm.early_stopping(5), lightgbm.log_evaluation(0)], classifier__eval_set=[(X_val_processed,y_val)])
+
+        # Log metrics for the test set
+        from mlflow.models import Model
+        from mlflow import pyfunc
+        from mlflow.pyfunc import PyFuncModel
+        
+        mlflow_model = Model()
+        pyfunc.add_to_model(mlflow_model, loader_module="mlflow.sklearn")
+        pyfunc_model = PyFuncModel(model_meta=mlflow_model, model_impl=model)
+        test_eval_result = mlflow.evaluate(
+            model=pyfunc_model,
+            data=X_test.assign(**{str(target_col):y_test}),
+            targets=target_col,
+            model_type="classifier",
+            evaluator_config = {"log_model_explainability": False,
+                                "metric_prefix": "test_" , "pos_label": 1 }
+        )
+        lgbmc_test_metrics = test_eval_result.metrics
+        lgbmc_test_metrics = {k.replace("test_", ""): v for k, v in lgbmc_test_metrics.items()}
+        test_run = pd.DataFrame({k:[val] for k,val in lgbmc_test_metrics.items()})
+        one_run = runs.loc[runs['tags.mlflow.runName']==run_name, ['run_id', 'tags.mlflow.runName', 'metrics.test_f1_score', 'metrics.test_precision_score', 'metrics.test_recall_score', 'metrics.test_roc_auc']]
+        one_run = one_run.reset_index().drop('index', axis=1)
+        
+        run = pd.concat([one_run, test_run], axis=1)
+        
+    else:
+        run = None
+    
+    return run
 
 # COMMAND ----------
 
@@ -171,29 +214,60 @@ def apply_model(runs_df, run_name, apply_df):
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC Run model predictions
+def show_map(merge_data, one_run, mod):
+    poor = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'prop_poor'].iloc[0], 2)
+    auc = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_roc_auc'].iloc[0], 2)
+    rec = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_recall_score'].iloc[0], 2)
+    prec = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_precision_score'].iloc[0], 2)
+    f1 = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_f1_score'].iloc[0], 2)
+    title = f'{mod}\n poor {poor}; roc-auc {auc}; recall {rec}; precision {prec}; f1 {f1}'
+    ax = merge_data.plot(column=mod, legend=True, vmax=1.0, cmap='viridis_r')
+    ax.set_title(title)
+    ax.set_axis_off()
 
 # COMMAND ----------
 
-mods = ['calm-sponge-868', 'omniscient-kit-369', 'bald-snipe-799', 'kindly-vole-791']
-for mod in mods:
-    pred, next_one_run = apply_model(runs, mod, app_df)
-    app_df[mod] = pred
-    one_run = pd.concat([one_run, next_one_run])
+def show_graphs(runs, mod):
+    # Create temp directory to download MLflow model artifact
+    eval_temp_dir = os.path.join(os.environ["SPARK_LOCAL_DIRS"], "tmp", str(uuid.uuid4())[:8])
+    os.makedirs(eval_temp_dir, exist_ok=True)
+
+    # Download the artifact
+    run_id = runs.loc[runs['tags.mlflow.runName']==mod, 'run_id'].iloc[0]
+    eval_path = mlflow.artifacts.download_artifacts(run_id=run_id, dst_path=eval_temp_dir)
+    
+    # display
+    eval_confusion_matrix_path = os.path.join(eval_path, "test_confusion_matrix.png")
+    display(Image(filename=eval_confusion_matrix_path, width=400))
+
+    eval_confusion_matrix_path = os.path.join(eval_path, "test_precision_recall_curve_plot.png")
+    display(Image(filename=eval_confusion_matrix_path, width=400))
+
+    eval_confusion_matrix_path = os.path.join(eval_path, "test_roc_curve_plot.png")
+    display(Image(filename=eval_confusion_matrix_path, width=400))
 
 # COMMAND ----------
 
-viz = pd.concat([coords, app_df[[model_name] + mods]], axis=1)
+# this function isn't working because X_val is needed
+def get_shap():
+    mlflow.autolog(disable=True)
+    mlflow.sklearn.autolog(disable=True)
+    from shap import KernelExplainer, summary_plot
+    # SHAP cannot explain models using data with nulls.
+    # To enable SHAP to succeed, both the background data and examples to explain are imputed with the mode (most frequent values).
+    mode = X_train.mode().iloc[0]
 
-# COMMAND ----------
+    # Sample background data for SHAP Explainer. Increase the sample size to reduce variance.
+    train_sample = X_train.sample(n=min(100, X_train.shape[0]), random_state=824288948).fillna(mode)
 
-!pip install geopandas
+    # Sample some rows from the validation set to explain. Increase the sample size for more thorough results.
+    example = X_val.sample(n=min(100, X_val.shape[0]), random_state=824288948).fillna(mode)
 
-# COMMAND ----------
-
-import geopandas as gpd  
-from shapely.geometry import Point
+    # Use Kernel SHAP to explain feature importance on the sampled rows from the validation set.
+    predict = lambda x: model.predict(pd.DataFrame(x, columns=X_train.columns))
+    explainer = KernelExplainer(predict, train_sample, link="identity")
+    shap_values = explainer.shap_values(example, l1_reg=False, nsamples=500)
+    summary_plot(shap_values, example, class_names=model.classes_)
 
 # COMMAND ----------
 
@@ -201,51 +275,66 @@ shp = gpd.read_file('/dbfs/FileStore/Myanmar_Survey_ML/data/geo/adm3_shapefile/m
 
 # COMMAND ----------
 
-geometry = [Point(xy)  for xy in zip(viz['lon'], viz['lat'])]
-viz_gdf = gpd.GeoDataFrame(viz, crs=shp.crs, geometry=geometry)
+mods = ['calm-sponge-868', 'omniscient-kit-369', 'bald-snipe-799', 'kindly-vole-791']
+
+def show_model(runs, run_name, df, app_df, coords, shp):
+    # remodeled and applied
+    pred_remod, one_run_remod = run_apply_model(runs, run_name, df, app_df)
+    # just applied
+    pred_apply, one_run_apply = apply_model(runs, run_name, app_df)
+
+    # create data for visualization
+    app_df[f'{run_name}-manual'] = pred_remod
+    app_df[run_name] = pred_apply
+    viz = pd.concat([coords, app_df], axis=1)
+
+    # geometry points
+    geometry = [Point(xy)  for xy in zip(viz['lon'], viz['lat'])]
+    viz_gdf = gpd.GeoDataFrame(viz, crs=shp.crs, geometry=geometry)
+
+    # Project PrioGrid and Admin1 to Mercator
+    viz_gdf = viz_gdf.to_crs(epsg=3857)
+    shp = shp.to_crs(epsg=3857)
+    
+    # join
+    viz_merge = gpd.tools.sjoin_nearest(viz_gdf, shp, how='inner')
+    mn = viz_merge[['TS', f'{run_name}-manual', run_name]].groupby('TS').mean()
+    mg = pd.merge(shp, mn, on='TS', how='outer')
+
+    show_map(mg, one_run_remod, f'{run_name}-manual')
+    show_map(mg, one_run_apply, run_name)
+    show_graphs(runs, run_name)
 
 # COMMAND ----------
 
-MercatorProjCode = 3857
-WSG84CRSCode = 4326
-       
-# Project PrioGrid and Admin1 to Mercator
-viz_gdf = viz_gdf.to_crs(epsg=MercatorProjCode)
-shp = shp.to_crs(epsg=MercatorProjCode)
- 
-# join
-viz_merge = gpd.tools.sjoin_nearest(viz_gdf, shp, how='inner')
+run_name = 'calm-sponge-868'
+show_model(runs, run_name, df, app_df, coords, shp)
 
 # COMMAND ----------
 
-mn = viz_merge[['TS', model_name] + mods].groupby('TS').mean()
-mg = pd.merge(shp, mn, on='TS', how='outer')
+run_name = 'kindly-vole-791'
+show_model(runs, run_name, df, app_df, coords, shp)
 
 # COMMAND ----------
 
-import matplotlib.pyplot as plt
+
 
 # COMMAND ----------
 
-for mod in ['calm-sponge-868-manual'] + mods:
-    poor = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'prop_poor'].iloc[0], 2)
-    auc = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_roc_auc'].iloc[0], 2)
-    rec = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_recall_score'].iloc[0], 2)
-    prec = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_precision_score'].iloc[0], 2)
-    f1 = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_f1_score'].iloc[0], 2)
-    title = f'{mod}\n poor {poor}; roc-auc {auc}; recall {rec}; precision {prec}; f1 {f1}'
-    ax = mg.plot(column=mod, legend=True, vmax=1.0, cmap='viridis_r')
-    ax.set_title(title)
-    ax.set_axis_off()
+
 
 # COMMAND ----------
 
-# import matplotlib.pyplot as plt
-# pnt_Test = viz_merge[viz_merge.ET_ID==0]
-# base = shp.boundary.plot(linewidth=1, edgecolor="black")
-# viz_merge.plot(ax=base, linewidth=1, color="blue", markersize=1)
-# pnt_Test.plot(ax=base, linewidth=1, color="red", markersize=1)
-# plt.show()
+# for mod in ['calm-sponge-868-manual'] + mods:
+#     poor = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'prop_poor'].iloc[0], 2)
+#     auc = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_roc_auc'].iloc[0], 2)
+#     rec = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_recall_score'].iloc[0], 2)
+#     prec = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_precision_score'].iloc[0], 2)
+#     f1 = round(one_run.loc[one_run['tags.mlflow.runName']==mod,'metrics.test_f1_score'].iloc[0], 2)
+#     title = f'{mod}\n poor {poor}; roc-auc {auc}; recall {rec}; precision {prec}; f1 {f1}'
+#     ax = mg.plot(column=mod, legend=True, vmax=1.0, cmap='viridis_r')
+#     ax.set_title(title)
+#     ax.set_axis_off()
 
 # COMMAND ----------
 

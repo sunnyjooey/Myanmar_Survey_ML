@@ -28,6 +28,14 @@ surv['ybin'] = surv['y'].apply(lambda x: 1 if x > 0 else 0)
 
 # COMMAND ----------
 
+sum(surv['poor'] != surv['ybin'])
+
+# COMMAND ----------
+
+surv.groupby('wealth_quintile').size()
+
+# COMMAND ----------
+
 # proportion poor (1=poor)
 surv.groupby('ybin').size() / surv.groupby('ybin').size().sum()
 
