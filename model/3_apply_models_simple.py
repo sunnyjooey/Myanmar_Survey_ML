@@ -40,6 +40,15 @@ runs['prec-recall-diff'] = abs(runs['metrics.test_precision_score'] - runs['metr
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC best eye-balled models: receptive-gnat, kindly-vol, judicious-wolf, debonair-hog
+
+# COMMAND ----------
+
+runs.loc[(runs['metrics.test_f1_score'] > 0.4) & (runs['prec-recall-diff'] < 0.1), ['tags.mlflow.runName','metrics.test_f1_score']].sort_values('metrics.test_f1_score', ascending=False)
+
+# COMMAND ----------
+
 # good f1 score, low difference precision and recall
 list(runs.loc[(runs['metrics.test_f1_score'] > 0.4) & (runs['prec-recall-diff'] < 0.1), 'tags.mlflow.runName'])
 

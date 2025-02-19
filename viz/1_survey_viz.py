@@ -81,7 +81,7 @@ shp = shp.to_crs(epsg=MercatorProjCode)
 fig, ax = plt.subplots()
 shp.plot(ax=ax, alpha=0.4, color='grey')
 surv_gdf.plot(ax=ax, 
-            markersize=10, 
+            markersize=.5, 
             color='blue', 
             marker='o')
 
